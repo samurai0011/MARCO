@@ -1,0 +1,151 @@
+# VK Uploader Pro - Manual Fix Commands
+# Copy and paste these commands one by one on your Ubuntu server
+
+# 1. Connect to server
+ssh root@203.57.85.17
+
+# 2. Navigate to project
+cd /root/vk-uploader-pro-2
+
+# 3. Stop the service
+systemctl stop vk-uploader-pro.service
+
+# 4. Backup files
+cp auth.py auth.py.backup
+cp main.py main.py.backup
+
+# 5. Create clean auth.py
+cat > auth.py << 'EOF'
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pyrogram.handlers import MessageHandler
+from db import get_user, add_user, remove_user, get_all_users, update_user_plan
+import vars
+
+async def is_authorized(user_id: int) -> bool:
+    try:
+        user = await get_user(user_id)
+        return user is not None
+    except:
+        return False
+
+async def add_user_cmd(client: Client, message: Message):
+    if message.from_user.id != vars.OWNER_ID:
+        await message.reply_text("❌ You are not authorized to use this command.")
+        return
+    
+    try:
+        if message.reply_to_message:
+            user_id = message.reply_to_message.from_user.id
+        else:
+            text = message.text.split()
+            if len(text) < 2:
+                await message.reply_text("❌ Please provide a user ID or reply to a user's message.")
+                return
+            user_id = int(text[1])
+        
+        await add_user(user_id, "premium", 30)
+        await message.reply_text(f"✅ User {user_id} has been added successfully!")
+        
+    except ValueError:
+        await message.reply_text("❌ Invalid user ID. Please provide a valid number.")
+    except Exception as e:
+        await message.reply_text(f"❌ Error adding user: {str(e)}")
+
+async def remove_user_cmd(client: Client, message: Message):
+    if message.from_user.id != vars.OWNER_ID:
+        await message.reply_text("❌ You are not authorized to use this command.")
+        return
+    
+    try:
+        if message.reply_to_message:
+            user_id = message.reply_to_message.from_user.id
+        else:
+            text = message.text.split()
+            if len(text) < 2:
+                await message.reply_text("❌ Please provide a user ID or reply to a user's message.")
+                return
+            user_id = int(text[1])
+        
+        await remove_user(user_id)
+        await message.reply_text(f"✅ User {user_id} has been removed successfully!")
+        
+    except ValueError:
+        await message.reply_text("❌ Invalid user ID. Please provide a valid number.")
+    except Exception as e:
+        await message.reply_text(f"❌ Error removing user: {str(e)}")
+
+async def list_users_cmd(client: Client, message: Message):
+    if message.from_user.id != vars.OWNER_ID:
+        await message.reply_text("❌ You are not authorized to use this command.")
+        return
+    
+    try:
+        users = await get_all_users()
+        if not users:
+            await message.reply_text("📝 No users found.")
+            return
+        
+        text = "👥 **Authorized Users:**\n\n"
+        for user in users:
+            text += f"🆔 **User ID:** `{user['user_id']}`\n"
+            text += f"📋 **Plan:** {user.get('plan', 'free')}\n"
+            text += f"📅 **Expires:** {user.get('expires_at', 'Never')}\n"
+            text += f"📊 **Downloads:** {user.get('downloads', 0)}\n\n"
+        
+        await message.reply_text(text)
+        
+    except Exception as e:
+        await message.reply_text(f"❌ Error listing users: {str(e)}")
+
+async def my_plan_cmd(client: Client, message: Message):
+    user_id = message.from_user.id
+    
+    try:
+        user = await get_user(user_id)
+        if not user:
+            await message.reply_text("❌ You are not authorized. Contact admin to get access.")
+            return
+        
+        plan = user.get('plan', 'free')
+        downloads = user.get('downloads', 0)
+        expires_at = user.get('expires_at', 'Never')
+        
+        text = f"📋 **Your Plan Information:**\n\n"
+        text += f"🆔 **User ID:** `{user_id}`\n"
+        text += f"📋 **Plan:** {plan}\n"
+        text += f"📊 **Downloads Used:** {downloads}\n"
+        text += f"📅 **Expires:** {expires_at}\n"
+        
+        await message.reply_text(text)
+        
+    except Exception as e:
+        await message.reply_text(f"❌ Error getting plan info: {str(e)}")
+
+def register_auth_handlers(bot):
+    bot.add_handler(MessageHandler(add_user_cmd, filters.command("add") & filters.private))
+    bot.add_handler(MessageHandler(remove_user_cmd, filters.command("remove") & filters.private))
+    bot.add_handler(MessageHandler(list_users_cmd, filters.command("users") & filters.private))
+    bot.add_handler(MessageHandler(my_plan_cmd, filters.command("plan") & filters.private))
+EOF
+
+# 6. Fix main.py - remove problematic line
+sed -i '/auth.register_auth_handlers(app)/d' main.py
+
+# 7. Add registration after bot creation
+sed -i '/bot = Client(/a\\n# Register auth handlers\nauth.register_auth_handlers(bot)' main.py
+
+# 8. Test the files
+/root/vk-uploader-pro-2/venv/bin/python -c "import auth; print('✅ auth.py OK')"
+
+# 9. Reload systemd
+systemctl daemon-reload
+
+# 10. Start service
+systemctl start vk-uploader-pro.service
+
+# 11. Check status
+systemctl status vk-uploader-pro.service
+
+# 12. Check if running
+systemctl is-active vk-uploader-pro.service
